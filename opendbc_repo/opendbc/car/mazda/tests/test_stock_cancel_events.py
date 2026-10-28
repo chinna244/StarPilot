@@ -7,7 +7,7 @@ from opendbc.car.mazda.values import CAR
 
 
 class TestStockCancelEvents(unittest.TestCase):
-  def test_actual_parser_cancel_is_scoped_to_marked_profile(self):
+  def test_measured_profile_reports_physical_cancel_for_both_permission_modes(self):
     for identity in (CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021):
       for experience in (0, 32):
         with self.subTest(identity=identity, experience=experience):
@@ -21,4 +21,4 @@ class TestStockCancelEvents(unittest.TestCase):
             state = ci.update([(tick * 10_000_000, [frame])])
             events.extend(bool(event.pressed) for event in state.buttonEvents
                           if event.type == structs.CarState.ButtonEvent.Type.cancel)
-          self.assertEqual(events, [True, False] if experience == 32 else [])
+          self.assertEqual(events, [True, False])

@@ -11,7 +11,9 @@ DASHBOARD_CARS = frozenset(CAR)
 def capable(cp):
   # Read-only observation scope is separate from active-control/AOL admission.
   # Dom's intentional dashboard commit explicitly covers all six GEN1 IDs.
-  return (cp.brand == 'mazda' and cp.carFingerprint in DASHBOARD_CARS and int(cp.flags) == int(MazdaFlags.GEN1) and not cp.notCar)
+  known = int(MazdaFlags.GEN1 | MazdaFlags.EPS_HW | MazdaFlags.G46L_RADAR | MazdaFlags.HAS_BSM)
+  return (cp.brand == 'mazda' and cp.carFingerprint in DASHBOARD_CARS and int(cp.flags) & ~known == 0 and
+          bool(cp.flags & MazdaFlags.GEN1) and not cp.notCar)
 
 
 def compose(cp, parsed, state, message, *, car_state_stamp):

@@ -41,10 +41,11 @@ def exercise_startup(identity, alpha, release, aol, monkeypatch, mapping=(0, 0),
     initial = CarInterface.get_params(identity, fingerprint, [], card_module.alpha_long_requested(saved, is_release=release), release, False)
     initial.carVin = "0" * 17
     initial.carFw = []
-    assert initial.safetyConfigs[0].safetyParam == 0
+    assert initial.safetyConfigs[0].safetyParam == (3 if initial.openpilotLongitudinalControl else 2)
     expected = initial.to_dict()
     explicit_owner = True
-    assert not initial.openpilotLongitudinalControl and initial.pcmCruise and not initial.dashcamOnly
+    assert initial.openpilotLongitudinalControl is (alpha and initial.alphaLongitudinalAvailable and not release)
+    assert initial.pcmCruise and not initial.dashcamOnly
     expected["alternativeExperience"] = 32 if aol and explicit_owner else 0
     subscriber = messaging.sub_sock("carParams", timeout=100, conflate=True)
     intent_subscriber = messaging.sub_sock("aolIntentWire", timeout=100, conflate=True)
@@ -144,12 +145,12 @@ def test_saved_button_mappings_reach_actual_card_owner(identity, mapping, monkey
 
 
 @pytest.mark.parametrize("identity", (CAR.MAZDA_CX5, CAR.MAZDA_CX9, CAR.MAZDA_3, CAR.MAZDA_6))
-def test_unchanged_dashcam_configuration_denies_independent_owner(identity):
+def test_other_mazda_configurations_still_deny_independent_owner(identity):
   from opendbc.car.mazda.stock_aol import qualified
   from openpilot.starpilot.car.mazda.aol import policy_for
 
   cp = CarInterface.get_params(identity, gen_empty_fingerprint(), [], False, False, False)
-  assert cp.dashcamOnly and cp.pcmCruise and not cp.openpilotLongitudinalControl
+  assert not cp.dashcamOnly and cp.pcmCruise and not cp.openpilotLongitudinalControl
   cp.alternativeExperience = 32
   assert not qualified(cp)
   policy = policy_for(cp)

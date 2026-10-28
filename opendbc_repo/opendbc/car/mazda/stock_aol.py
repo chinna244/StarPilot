@@ -5,13 +5,21 @@ CARS = frozenset((CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021))
 
 
 def qualified(cp, *, marked_only=False):
-  return (cp.brand == "mazda" and cp.carFingerprint in CARS and int(cp.flags) == int(MazdaFlags.GEN1) and
-          not cp.passive and not cp.notCar and not cp.dashcamOnly and
+  if not (cp.brand == "mazda" and cp.carFingerprint in CARS and not cp.passive and not cp.notCar and not cp.dashcamOnly and
           cp.transmissionType != structs.CarParams.TransmissionType.manual and
-          cp.fingerprintSource != structs.CarParams.FingerprintSource.fixed and
-          cp.pcmCruise and not cp.openpilotLongitudinalControl and len(cp.safetyConfigs) == 1 and
+          cp.fingerprintSource != structs.CarParams.FingerprintSource.fixed and cp.pcmCruise and len(cp.safetyConfigs) == 1 and
           cp.safetyConfigs[0].safetyModel == structs.CarParams.SafetyModel.mazda and
-          cp.safetyConfigs[0].safetyParam == 0 and cp.alternativeExperience in ((32,) if marked_only else (0, 32)))
+          cp.alternativeExperience in ((32,) if marked_only else (0, 32))):
+    return False
+  flags, word = int(cp.flags), int(cp.safetyConfigs[0].safetyParam)
+  legacy = flags == int(MazdaFlags.GEN1) and word == 0 and not cp.openpilotLongitudinalControl
+  known = int(MazdaFlags.GEN1 | MazdaFlags.EPS_HW | MazdaFlags.G46L_RADAR | MazdaFlags.HAS_BSM)
+  measured = (flags & ~known == 0 and flags & int(MazdaFlags.GEN1) and
+              flags & int(MazdaFlags.EPS_HW) in (int(MazdaFlags.STEER_TO_ZERO_EPS), int(MazdaFlags.LEGACY_FW_EPS)) and
+              word in (2, 3, 10, 11) and bool(word & 1) == bool(cp.openpilotLongitudinalControl) and
+              (not cp.openpilotLongitudinalControl or
+               cp.carFingerprint == CAR.MAZDA_CX5_2022 and bool(flags & int(MazdaFlags.STEER_TO_ZERO_EPS)) and cp.alphaLongitudinalAvailable))
+  return bool(legacy or measured)
 
 
 def temporary_restriction(cp, state):

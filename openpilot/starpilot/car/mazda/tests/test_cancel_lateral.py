@@ -19,9 +19,9 @@ def proof(identity):
   settings = AolSettings(True, 0., 0, 0, (0, 0, 0), (0, 0, 0))
   intent = IntentState('card-session', 1, 1_000_000_000, 1_000_000_000, 1_200_000_000,
                        True, False, False, True, True)
-  native = SafetyState(1, True, 1_000_000_000, 1_200_000_000, 13, 0, True, False, True, False,
+  native = SafetyState(1, True, 1_000_000_000, 1_200_000_000, 13, cp.safetyConfigs[0].safetyParam, True, False, True, False,
                        'mazda-panda', 'axis-session', 1_000_000_000,
-                       (PandaSlot(0, 'mazda-panda', 13, 0, 32),))
+                       (PandaSlot(0, 'mazda-panda', 13, cp.safetyConfigs[0].safetyParam, 32),))
   context = {'settings': settings, 'previous': AxisDecision(True, False, True, False, True),
              'source_ns': 1_000_000_000, 'now_ns': 1_010_000_000, 'axis_session_id': 'axis-session'}
   return cp, cs, intent, native, context
@@ -81,7 +81,7 @@ def test_cancel_exception_never_invents_intent_or_permission(failure):
   elif failure == 'native_model':
     native = replace(native, safetyModel=0)
   elif failure == 'native_param':
-    native = replace(native, safetyParam=2)
+    native = replace(native, safetyParam=4)
   elif failure == 'native_rx_fault':
     native = replace(native, pandaInventory=(replace(native.pandaInventory[0], safetyRxChecksInvalid=True),))
   elif failure == 'native_fault':

@@ -29,7 +29,6 @@ def test_longitudinal_cancel_assignment_keeps_lateral_actual_callers(identity, m
   _exercise_actual_family_callers(identity, monkeypatch, scenario='long_cancel', cancel_action=4)
 
 
-
 @pytest.fixture(scope='module')
 def armed_intent_decoder(tmp_path_factory):
   import capnproto
@@ -117,6 +116,7 @@ def _exercise_actual_family_callers(identity, monkeypatch, *, scenario='brake', 
         assert card.aol_card_intent.settings == sd.aol_settings
       soft_warning = [False]
       original_events = sd.update_events
+
       def warning_events(*args, **kwargs):
         original_events(*args, **kwargs)
         if soft_warning[0]:
@@ -126,7 +126,7 @@ def _exercise_actual_family_callers(identity, monkeypatch, *, scenario='brake', 
       assert sd.CP.to_dict() == card.CP.to_dict() == ci.CP.to_dict() == controls.CP.to_dict()
       safety.init_tests()
       safety.set_alternative_experience(int(card.CP.alternativeExperience))
-      safety.set_safety_hooks(structs.CarParams.SafetyModel.mazda, 0)
+      safety.set_safety_hooks(structs.CarParams.SafetyModel.mazda, card.CP.safetyConfigs[0].safetyParam)
       safety.set_aol_test_heartbeat(False)
       local_patch.setattr(card_module.time, 'monotonic_ns', lambda: now[0])
       local_patch.setattr(card_module.time, 'clock_gettime_ns', lambda clock: now[0])
@@ -213,7 +213,7 @@ def _exercise_actual_family_callers(identity, monkeypatch, *, scenario='brake', 
         events[0].deviceState.startedMonoTime = 9_000_000_000
         panda = events[-1].pandaStates[0]
         panda.safetyModel = card.CP.safetyConfigs[0].safetyModel
-        panda.safetyParam = 0
+        panda.safetyParam = card.CP.safetyConfigs[0].safetyParam
         panda.alternativeExperience = int(card.CP.alternativeExperience)
         panda.controlsAllowed = safety.get_controls_allowed()
         if 'onroadEvents' not in previous_sd:
@@ -223,9 +223,10 @@ def _exercise_actual_family_callers(identity, monkeypatch, *, scenario='brake', 
             events.append(previous_sd[name].as_builder())
         wire = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=now[0])
         wire.aolSafetyWire = encode_safety(SafetyState(1, True, now[0], now[0] + 30_000_000,
-          int(card.CP.safetyConfigs[0].safetyModel.raw), 0, bool(mask & 1), bool(mask & 2),
+          int(card.CP.safetyConfigs[0].safetyModel.raw), card.CP.safetyConfigs[0].safetyParam, bool(mask & 1), bool(mask & 2),
           reported_request_lat, reported_request_long, 'native-mazda-test', card.aol_axis_session(), now[0],
-          (PandaSlot(0, 'native-mazda-test', int(card.CP.safetyConfigs[0].safetyModel.raw), 0, int(card.CP.alternativeExperience),
+          (PandaSlot(0, 'native-mazda-test', int(card.CP.safetyConfigs[0].safetyModel.raw),
+                     card.CP.safetyConfigs[0].safetyParam, int(card.CP.alternativeExperience),
                      safety.get_controls_allowed(), bool(not safety.safety_config_valid()),
                      False, int(bool(safety.get_relay_malfunction()))),)))
         events.append(wire)
@@ -253,7 +254,14 @@ def _exercise_actual_family_callers(identity, monkeypatch, *, scenario='brake', 
           assert outgoing.valid
           assert any(frame.address == 0x243 for frame in outgoing.sendcan)
           for frame in outgoing.sendcan:
-            assert safety.safety_tx_hook(make_msg(frame.src, frame.address, dat=frame.dat))
+            accepted = safety.safety_tx_hook(make_msg(frame.src, frame.address, dat=frame.dat))
+            if frame.src == 0 and frame.address in (0x243, 0x440) and not mask & 1:
+              # The measured profile leaves both addresses to the stock camera while lateral is idle.
+              assert not accepted
+              if frame.address == 0x243:
+                assert (((frame.dat[0] & 15) << 8) | frame.dat[1]) - 2048 == 0
+            else:
+              assert accepted
         if unbelted and belt_off[0]:
           assert state.seatbeltUnlatched
           assert not axis.desiredLongitudinal and not axis.longitudinalActive and not command.longActive
@@ -518,7 +526,7 @@ def test_main_on_startup_disabled_aol_actual_card_controls_native(identity, monk
     safety = libsafety_py.libsafety
     safety.init_tests()
     safety.set_alternative_experience(int(card.CP.alternativeExperience))
-    safety.set_safety_hooks(structs.CarParams.SafetyModel.mazda, 0)
+    safety.set_safety_hooks(structs.CarParams.SafetyModel.mazda, card.CP.safetyConfigs[0].safetyParam)
     try:
       assert card.CP.alternativeExperience == 0
       for tick in range(1, 131):
@@ -538,7 +546,7 @@ def test_main_on_startup_disabled_aol_actual_card_controls_native(identity, monk
         events[0].deviceState.startedMonoTime = 9_000_000_000
         panda = events[-1].pandaStates[0]
         panda.safetyModel = card.CP.safetyConfigs[0].safetyModel
-        panda.safetyParam = 0
+        panda.safetyParam = card.CP.safetyConfigs[0].safetyParam
         panda.alternativeExperience = 0
         card.sm.update_msgs(now[0] / 1e9, [e.as_reader() for e in events])
         state, _ = card.state_update()

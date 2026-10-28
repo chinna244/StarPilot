@@ -20,6 +20,7 @@ def bolt_disable_supported(cp) -> bool:
 @dataclass(frozen=True)
 class VehicleStartupPreferences:
   toyota_auto_hold: bool = False
+  mazda_tja: bool = field(default=False, kw_only=True)
   jeep_brake_hold: bool = field(default=False, kw_only=True)
   turn_assist: bool = False
   gm_long_pitch: bool = True
@@ -104,7 +105,10 @@ class VehicleStartupPreferences:
                   read_saved(params, 'AlwaysOnLateral', 8) == (b'1', True) and
                   read_saved(params, 'TeslaAOLScreenTap', 8) == (b'1', True))
     screen_brake = read_saved(params, 'TeslaAOLDisengageOnBrake', 8) == (b'1', True)
-    return cls(vw_stock_long=vw_stock_long,
+    return cls(mazda_tja=bool(enabled and readable and safe in (None, b"0") and
+                             read_saved(params, "MazdaTjaButton", 8) == (b"1", True) and
+                             read_saved(params, "AlwaysOnLateral", 8) in ((None, True), (b"1", True))),
+               vw_stock_long=vw_stock_long,
                subaru_smoothing=smoothing, subaru_avh_startup=bool(enabled and readable and safe in (None, b"0") and
                     read_saved(params, "IsReleaseBranch", 8) in ((None, True), (b"0", True)) and
                     read_saved(params, "SubaruAvhStartup", 8) == (b"1", True)),
@@ -178,6 +182,10 @@ class VehicleStartupPreferences:
       prepare_disable_longitudinal(cp, True)
 
   def prepare(self, cp, *, fingerprints=None):
+    if cp.brand == "mazda":
+      from opendbc.car.mazda.stock_aol import qualified
+      if qualified(cp):
+        cp.safetyConfigs[0].safetyParam = (cp.safetyConfigs[0].safetyParam & ~8) | (8 if self.mazda_tja else 0)
     from opendbc.car.volkswagen.meb_modes import prepare_stock as prepare_meb_stock
     prepare_meb_stock(cp, self.disable_bolt_long or self.vw_stock_long)
     from opendbc.car.subaru.software_cruise import prepare

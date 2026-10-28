@@ -3,6 +3,7 @@
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/modes/mazda_stock_aol.h"
 
+
 // CAN msgs we care about
 #define MAZDA_LKAS          0x243U
 #define MAZDA_LKAS_HUD      0x440U
@@ -16,8 +17,22 @@
 #define MAZDA_MAIN 0
 #define MAZDA_CAM  2
 
+static RxCheck mazda_rx_checks[] = {
+    {.msg = {{MAZDA_CRZ_CTRL,     0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_CRZ_BTNS,     0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_STEER_TORQUE, 0, 8, 83U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_ENGINE_DATA,  0, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_PEDALS,       0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+  };
+
+#include "opendbc/safety/modes/mazda_port.h"
+
 // track msgs coming from OP so that we know what CAM msgs to drop and what to forward
 static void mazda_rx_hook(const CANPacket_t *msg) {
+  if (current_safety_param != 0U) {
+    mazda_port_rx_hook(msg);
+    return;
+  }
   mazda_aol_rx(msg);
   if (msg_matches(msg, MAZDA_ENGINE_DATA, MAZDA_MAIN)) {
     // sample speed: scale by 0.01 to get kph
@@ -49,6 +64,9 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
 }
 
 static bool mazda_tx_hook(const CANPacket_t *msg) {
+  if (current_safety_param != 0U) {
+    return mazda_port_tx_hook(msg);
+  }
   const TorqueSteeringLimits MAZDA_STEERING_LIMITS = {
     .max_torque = 800,
     .max_rate_up = 10,
@@ -85,19 +103,16 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
 }
 
 static safety_config mazda_init(uint16_t param) {
+  if (param != 0U) {
+    return mazda_port_init(param);
+  }
   static CanMsg MAZDA_TX_MSGS[] = {
     {MAZDA_LKAS, 0, 8, .check_relay = true},
     {MAZDA_CRZ_BTNS, 0, 8, .check_relay = false},
     {MAZDA_LKAS_HUD, 0, 8, .check_relay = true},
   };
 
-  static RxCheck mazda_rx_checks[] = {
-    {.msg = {{MAZDA_CRZ_CTRL,     0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
-    {.msg = {{MAZDA_CRZ_BTNS,     0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
-    {.msg = {{MAZDA_STEER_TORQUE, 0, 8, 83U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
-    {.msg = {{MAZDA_ENGINE_DATA,  0, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
-    {.msg = {{MAZDA_PEDALS,       0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
-  };
+
 
   mazda_aol_reset();
   mazda_aol_enabled = (param == 0U) && ((unsigned int)alternative_experience == 32U);
@@ -121,10 +136,21 @@ static safety_config mazda_init(uint16_t param) {
   return ret;
 }
 
+static bool mazda_forward(int bus, int addr) {
+  return current_safety_param != 0U ? mazda_port_fwd_hook(bus, addr) : mazda_aol_fwd(bus, addr);
+}
+
+static void mazda_forward_modify(int bus, CANPacket_t *msg) {
+  if (current_safety_param != 0U) {
+    mazda_port_fwd_modify(bus, msg);
+  }
+}
+
 const safety_hooks mazda_hooks = {
   .init = mazda_init,
   .rx = mazda_rx_hook,
   .tx = mazda_tx_hook,
   .optional_rx = mazda_aol_optional_rx,
-  .fwd = mazda_aol_fwd,
+  .fwd = mazda_forward,
+  .fwd_modify = mazda_forward_modify,
 };

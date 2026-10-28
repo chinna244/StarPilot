@@ -13,12 +13,13 @@ SUPPORTED = (CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021)
 
 @pytest.mark.parametrize('identity', list(CAR))
 @pytest.mark.parametrize('alpha,release', ((False, False), (True, False), (False, True), (True, True)))
-def test_all_factory_variants_preserve_stock_ownership(identity, alpha, release):
+def test_all_factory_variants_match_the_requested_measured_profile(identity, alpha, release):
   cp = CarInterface.get_params(identity, gen_empty_fingerprint(), [], alpha, release, False)
-  assert cp.dashcamOnly is (identity not in SUPPORTED)
-  assert cp.pcmCruise and not cp.openpilotLongitudinalControl and cp.mass > 1000
-  assert cp.steerActuatorDelay == pytest.approx(0.1) and cp.steerLimitTimer == pytest.approx(0.8)
-  assert cp.safetyConfigs[0].safetyParam == 0 and len(cp.safetyConfigs) == 1
+  assert not cp.dashcamOnly
+  assert cp.pcmCruise and cp.mass > 1000
+  assert cp.openpilotLongitudinalControl is (alpha and cp.alphaLongitudinalAvailable)
+  assert cp.steerActuatorDelay == pytest.approx(0.05) and cp.steerLimitTimer == pytest.approx(0.8)
+  assert cp.safetyConfigs[0].safetyParam == (3 if cp.openpilotLongitudinalControl else 2) and len(cp.safetyConfigs) == 1
   assert type(CarInterface(cp).CC).__module__ == 'opendbc.car.mazda.carcontroller'
 
 
@@ -32,11 +33,13 @@ def test_actual_card_composes_original_camera_observation(identity, aol, monkeyp
     monkeypatch.setattr(dashboard.time, 'monotonic_ns', lambda: mono[0])
     monkeypatch.setattr(dashboard.time, 'clock_gettime_ns', lambda clock: mono[0] + offset)
     create = messaging.new_message
+
     def new_message(service=None, size=None, **kwargs):
       kwargs.setdefault('logMonoTime', mono[0])
       return create(service, size, **kwargs)
     monkeypatch.setattr(messaging, 'new_message', new_message)
     sent, send = [], card.pm.send
+
     def capture(service, event):
       if service == 'starpilotCarState':
         event = event.to_bytes()
@@ -114,5 +117,5 @@ def test_all_six_dom_dashboard_identities_observe_without_new_actuation(identity
   message = dashboard.compose(cp, ci.CS, state, None, car_state_stamp=now)
   assert message.starpilotCarState.dashboardStopSign == 1
   assert cp.to_dict() == before
-  assert cp.dashcamOnly is (identity not in SUPPORTED)
+  assert not cp.dashcamOnly
   assert cp.pcmCruise and not cp.openpilotLongitudinalControl

@@ -208,6 +208,7 @@ static void can_rx(uint8_t can_number) {
       to_send.bus = to_push.bus;
       to_send.data_len_code = to_push.data_len_code;
       (void)memcpy(to_send.data, to_push.data, dlc_to_len[to_push.data_len_code]);
+      safety_fwd_modify_hook(bus_number, &to_send);
       can_set_checksum(&to_send);
 
       can_send(&to_send, bus_fwd_num, true);

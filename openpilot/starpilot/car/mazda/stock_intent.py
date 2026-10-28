@@ -10,8 +10,10 @@ class MazdaStockCardIntent(AolCardIntent):
   def __init__(self, cp, settings):
     super().__init__(settings, explicit_latch=True)
     self.cp = cp
+    self.tja_button = bool(cp.safetyConfigs[0].safetyParam & 8)
+    self.independent_cruise_buttons = self.tja_button
     self.main_seen = False
-    self.startup_main_pending = True
+    self.startup_main_pending = not self.tja_button
     self.startup_main_source_ns = 0
     self.startup_native_ready = False
     self.startup_binding = None
@@ -20,6 +22,14 @@ class MazdaStockCardIntent(AolCardIntent):
     self.main_pulse = False
     self.cancel_held = False
     self.cancel_ticks = 0
+
+  @property
+  def lkas_action(self):
+    return AOL_TOGGLE if self.tja_button else super().lkas_action
+
+  @property
+  def main_action(self):
+    return 0 if self.tja_button else super().main_action
 
   def observe_startup_readiness(self, sm, CS, *, native, panda_ready, now_ns, producer):
     from openpilot.starpilot.aol.intent import disarming_fault
@@ -77,6 +87,9 @@ class MazdaStockCardIntent(AolCardIntent):
 
   def update(self, CS, **kwargs):
     state = structs.CarState(**CS.to_dict())
+    if self.tja_button:
+      # Only this lateral-intent view is independent of MRCC; cruiseState stays physical on the wire.
+      state.cruiseState.available = True
     events = []
     for event in CS.buttonEvents:
       if event.type == ButtonType.cancel:
@@ -89,8 +102,12 @@ class MazdaStockCardIntent(AolCardIntent):
           self.cancel_held = False
           self.cancel_ticks = 0
       elif event.type in (ButtonType.mainCruise, ButtonType.lkas):
-        action = self.settings.main_action if event.type == ButtonType.mainCruise else self.settings.lkas_action
+        action = self.main_action if event.type == ButtonType.mainCruise else self.lkas_action
         if action == AOL_TOGGLE:
+          events.append(structs.CarState.ButtonEvent(**event.to_dict()))
+        elif (not self.tja_button and event.type == ButtonType.mainCruise and action == 0 and
+              (not self.allowed_latch or not event.pressed)):
+          # A fresh unmapped ON may rearm standby, but never toggles an active latch off.
           events.append(structs.CarState.ButtonEvent(**event.to_dict()))
         elif event.pressed:
           self._perform(action)

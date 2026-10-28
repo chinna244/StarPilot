@@ -8,11 +8,12 @@ def policy_for(cp):
   admitted = qualified(cp)
   return AolVehiclePolicy(intent_supported=admitted, settings_supported=admitted, runtime_supported=admitted,
                           normal_runtime_supported=admitted, ordinary_axis_ack_required=qualified(cp, marked_only=True),
-                          explicit_latch=admitted, alternative_experience_addition=32 if admitted else 0)
+                          explicit_latch=admitted, cruise_main_required=not (admitted and bool(cp.safetyConfigs[0].safetyParam & 8)),
+                          alternative_experience_addition=32 if admitted else 0)
 
 
 def native_profile_supported(model, param):
-  return model == int(structs.CarParams.SafetyModel.mazda) and param == 0
+  return model == int(structs.CarParams.SafetyModel.mazda) and param in (0, 2, 3, 10, 11)
 
 
 def native_accepts_cp(cp, model, param):

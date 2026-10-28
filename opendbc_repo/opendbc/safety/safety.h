@@ -641,3 +641,10 @@ void speed_mismatch_check(const float speed_2) {
     controls_allowed = false;
   }
 }
+
+// Called only on the already-admitted forwarding copy, never the RX observation.
+void safety_fwd_modify_hook(int bus_num, CANPacket_t *msg) {
+  if ((current_hooks != NULL) && (current_hooks->fwd_modify != NULL)) {
+    current_hooks->fwd_modify(bus_num, msg);
+  }
+}

@@ -14,6 +14,10 @@ an open source driver assistance system.
 **This is the StarPilot 7.0 development branch (`SecretGoodStarPilot`). Feature migration,
 vehicle qualification, and Auto Learn validation are still in progress.**
 
+The Mazda port is adapted from chinna244/zoompilot and its pinned opendbc source; see
+[the Mazda port notes](docs/mazda-port/README.md) for revisions and validation limits.
+This project uses software from Haibin Wen and SUNNYPILOT LLC and is licensed under a custom license requiring permission for use.
+
 Openpilot provides
 * Automated Lane Centering
 * Adaptive Cruise Control

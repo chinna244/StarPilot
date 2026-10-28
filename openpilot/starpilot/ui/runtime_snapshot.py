@@ -47,6 +47,7 @@ from openpilot.starpilot.ui.onroad_state import (AlertSize, BorderSignals, Obser
 from openpilot.starpilot.ui.unified_speed_presentation import displayed_adjusted_limit_mps, displayed_limit_mps, positive, retaining_limit
 from openpilot.starpilot.ui.onroad_stopped_timer import StoppedTimer
 from openpilot.starpilot.ui.onroad_lane_alerts import lateral_lane_alert
+from openpilot.starpilot.car.mazda.radar_status import notice as mazda_radar_notice, read as read_mazda_radar_status
 from openpilot.starpilot.ui.onroad_camera import ReverseDriverCamera
 from openpilot.starpilot.ui.navigation_state import navigation_display, official_navigation_display
 from openpilot.starpilot.ui.settings_state import Destination, DestinationAvailability, SettingsState
@@ -303,6 +304,8 @@ class RuntimeSnapshotAdapter:
     self._appearance_read_ns: int | None = None
     # A second screen (Android Auto) swaps in its own display choices before anything uses them.
     self.appearance_override: Callable[[OnroadAppearance], OnroadAppearance] | None = None
+    self._mazda_status = None
+    self._mazda_restore_failed = False
     self._last_mode: ShellMode | None = None
     self._jetlink = JetlinkStatusFeed()
     self._onroad_ancillary: tuple[int, tuple[bool, int, bool], ShellSnapshot] | None = None
@@ -404,6 +407,11 @@ class RuntimeSnapshotAdapter:
       if self.appearance_override is not None:
         self._appearance_value = self.appearance_override(self._appearance_value)
       self._appearance_read_ns = now_ns
+      if getattr(getattr(self.ui_state, 'CP', None), 'brand', None) == 'mazda':
+        self._mazda_status = read_mazda_radar_status(self.ui_state.params)
+        self._mazda_restore_failed = self.ui_state.params.get_bool('StockEcuHandBackFailed')
+      else:
+        self._mazda_status, self._mazda_restore_failed = None, False
     ui, params = self.ui_state, self.ui_state.params
     if (self._conditional_read_ns is None or now_ns < self._conditional_read_ns or
         now_ns - self._conditional_read_ns >= 1_000_000_000):
@@ -437,6 +445,8 @@ class RuntimeSnapshotAdapter:
     native_alert = current_alert(sm, now_ns, after_frame=after) if started else OnroadAlert()
     native_alert = lateral_lane_alert(native_alert, car=display_car, control=display_control,
                                       model=display_model, selfdrive=display_selfdrive)
+    if started and getattr(ui, 'replay_clock', None) is None:
+      native_alert = mazda_radar_notice(native_alert, ui.CP, self._mazda_status, self._mazda_restore_failed, now_ns)
     alert = self._personality_notice.update(
       display_selfdrive, drive_frame=after, event_ns=int(sm.logMonoTime['selfdriveState']) if display_selfdrive is not None else 0,
       now_ns=now_ns, native_alert=native_alert, hide=self._appearance_value.hide_personality_alerts)

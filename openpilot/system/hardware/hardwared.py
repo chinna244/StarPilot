@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from openpilot.starpilot.drive_state.owner import DriveStateOwner
+from openpilot.starpilot.car.stock_ecu_handback import StockEcuHandBackGate, mazda_handback_required
 from openpilot.starpilot.drive_state.resolver import Mode, effective_onroad, should_start as resolve_start
 from openpilot.starpilot.storage import starpilot_storage_root
 from collections import OrderedDict, namedtuple
@@ -265,6 +266,7 @@ def hardware_thread(end_event, hw_queue) -> None:
   offroad_cycle_count = 0
 
   params = Params()
+  mazda_stop_gate = StockEcuHandBackGate(params)
   drive_state = DriveStateOwner(params, starpilot_storage_root() / "drive-state")
   drive_mode = Mode.AUTO
   physical_ignition_prev = None
@@ -290,7 +292,9 @@ def hardware_thread(end_event, hw_queue) -> None:
     peripheralState = sm['peripheralState']
 
     # handle requests to cycle system started state
-    if params.get_bool("OnroadCycleRequested"):
+    cycle_requested = params.get_bool("OnroadCycleRequested")
+    mazda_restore_needed = cycle_requested and started_ts is not None and mazda_handback_required(params)
+    if cycle_requested and (not mazda_restore_needed or mazda_stop_gate.ready(True)):
       params.put_bool("OnroadCycleRequested", False, block=True)
       offroad_cycle_count = sm.frame
     onroad_conditions["not_onroad_cycle"] = (sm.frame - offroad_cycle_count) >= ONROAD_CYCLE_TIME * SERVICE_LIST['pandaStates'].frequency
@@ -428,6 +432,13 @@ def hardware_thread(end_event, hw_queue) -> None:
 
     # Handle offroad/onroad transition
     should_start = resolve_start(drive_mode, onroad_conditions, startup_conditions, already_started=started_ts is not None)
+    if (not should_start and started_ts is not None and onroad_conditions["ignition"] and
+        onroad_conditions["not_onroad_cycle"] and mazda_handback_required(params)):
+      if not mazda_stop_gate.ready(True, hold_on_failure=drive_mode == Mode.OFFROAD):
+        should_start = True
+    elif should_start and not cycle_requested:
+      mazda_stop_gate.reset()
+
 
     if should_start != should_start_prev or (count == 0):
       params.put_bool("IsEngaged", False, block=True)

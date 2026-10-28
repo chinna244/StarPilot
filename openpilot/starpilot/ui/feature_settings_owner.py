@@ -74,6 +74,7 @@ from openpilot.starpilot.controllers.toyota_cruise import capability as toyota_c
 
 
 BOOL_DEFAULTS = {
+  "MazdaTjaButton": False,
   "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "TurnAssist": True,
   "SubaruAvhStartup": False,
   "SubaruStopStartOff": False,
@@ -364,6 +365,24 @@ class FeatureSettingsOwner:
   def _subaru_startup_capability(self):
     from openpilot.starpilot.car.subaru.stop_start_settings import capability
     return capability(self)
+
+  def _mazda_tja_capability(self):
+    from opendbc.car.mazda.stock_aol import qualified
+    cp = self.vehicle_params()
+    return (str(cp.carFingerprint), str(cp.brand), int(cp.flags)) if cp is not None and qualified(cp) else None
+
+  def _apply_mazda_tja(self, request):
+    if not request.confirmation or request.value not in ("Off", "On") or request.dependencies:
+      return False
+    def authorized():
+      return (self.authority("parked_preferences") and self.authority("preferences") and
+              request.capability is not None and request.capability == self._mazda_tja_capability() and
+              request.vehicle_fingerprint == self.vehicle_fingerprint() and request.expected in (None, b"0", b"1"))
+    result = commit_exact(self.params, key="MazdaTjaButton", max_bytes=8, expected=request.expected,
+                          raw=b"1" if request.value == "On" else b"0", authorized=authorized, temp_prefix=".mazda-tja-")
+    if result.verified and authorized():
+      self.params.put_bool("OnroadCycleRequested", True, block=True)
+    return result.verified
 
   def _subaru_sng_capability(self):
     from openpilot.starpilot.car.subaru.sng_settings import capability
@@ -816,7 +835,7 @@ class FeatureSettingsOwner:
               FeatureRow("", "Steering and Torque", "Select the steering controller and tune its response", page=FeaturePage.TORQUE, available=True),
               FeatureRow("", "Always On Lateral", "Keep steering assistance active independently of cruise control", page=FeaturePage.AOL, available=True),
               FeatureRow("", "Wheel Controls", "Assign steering-wheel buttons and cruise behavior", page=FeaturePage.WHEEL, available=True)]
-      if (self._long_pitch_capability() is not None or self._bolt_disable_capability() is not None or
+      if (self._mazda_tja_capability() is not None or self._long_pitch_capability() is not None or self._bolt_disable_capability() is not None or
           self._auto_hold_capability() is not None or self._jeep_hold_capability() is not None or
           self._toyota_radar_capability() is not None or self._pedal_setup_capability() is not None or
           self.subaru_smoothing.capability() is not None or
@@ -832,6 +851,18 @@ class FeatureSettingsOwner:
     elif page == FeaturePage.VEHICLE:
       title = "Vehicle Settings"
       rows = list(self._alpha_long_rows(parked))
+      mazda_tja = self._mazda_tja_capability()
+      if mazda_tja is not None:
+        row = self._bool_row("MazdaTjaButton", "Mazda TJA Button",
+                             parked and self.authority("parked_preferences") and self.authority("preferences"),
+                             "Use the physical TJA button for steering assistance independently of cruise. " +
+                             "Requires Always On Lateral; applies after the next startup.")
+        rows.append(replace(row, available=row.available and self._readable("MazdaTjaButton"), capability=mazda_tja))
+        from openpilot.starpilot.car.mazda.radar_status import read as read_radar_status, status_text
+        import time
+        radar = status_text(read_radar_status(self.params), self.params.get_bool("StockEcuHandBackFailed"),
+                            time.monotonic_ns(), self.vehicle_fingerprint())
+        rows.append(FeatureRow("", "Mazda Radar", radar, available=False))
       capability = self._auto_hold_capability()
       allowed = configurable and capability is not None and self.authority("vehicle")
       row = self._bool_row("ToyotaAutoHold", "Automatic Brake Hold", allowed,
@@ -1352,6 +1383,8 @@ class FeatureSettingsOwner:
     if key == "SubaruStopStartOff":
       from openpilot.starpilot.car.subaru.stop_start_settings import apply
       return apply(self, request)
+    if key == "MazdaTjaButton":
+      return self._apply_mazda_tja(request)
     if key == "SubaruSNG":
       from openpilot.starpilot.car.subaru.sng_settings import apply
       return apply(self, request)

@@ -1,6 +1,6 @@
 """Confirmation text for parked vehicle preferences."""
 
-VEHICLE_BOOL_KEYS = frozenset(("AlphaLongitudinalEnabled", "SubaruAvhStartup", "SubaruStopStartOff", "SubaruSNG", "SubaruRedneckCruise",
+VEHICLE_BOOL_KEYS = frozenset(("MazdaTjaButton", "AlphaLongitudinalEnabled", "SubaruAvhStartup", "SubaruStopStartOff", "SubaruSNG", "SubaruRedneckCruise",
                               "GMPedalLongitudinal", "DisableOpenpilotLongitudinal", "LongPitch", "VoltSNG", "GMAutoHold", "VoltOnePedalMode",
                               "TeslaAOLScreenTap", "TeslaAOLDisengageOnBrake",
                               "RemoteStartBootsComma", "HKGRemoteStartBootsComma", "IgnoreIgnitionLine", "TeslaWakeOnCAN"))
@@ -13,6 +13,8 @@ def confirmation_question(request):
   from openpilot.starpilot.ui.panda_wake_feature import LABELS
   if request.key in LABELS:
     return f"{verb} {LABELS[request.key][0].lower()}? This changes Panda firmware after the next device restart."
+  if request.key == "MazdaTjaButton":
+    return f"{verb} the physical Mazda TJA button for steering assistance independently of cruise after the next startup? Requires Always On Lateral."
   if request.key == "AlphaLongitudinalEnabled":
     return (f"{verb} Alpha Longitudinal after the next startup? StarPilot will request speed control instead of factory ACC. " +
             "Automatic Emergency Braking may be disabled; exact startup checks still apply.")

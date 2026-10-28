@@ -10,6 +10,7 @@ from openpilot.starpilot.drive_state.owner import DriveStateOwner
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
 from openpilot.common.utils import atomic_write
+from openpilot.starpilot.car.stock_ecu_handback import StockEcuHandBackGate, mazda_handback_required
 from openpilot.common.params import Params, ParamKeyFlag, UnknownKeyName
 from openpilot.common.text_window import TextWindow
 from openpilot.common.hardware import HARDWARE, PC
@@ -139,6 +140,7 @@ def manager_thread() -> None:
   cloudlog.info({"environ": os.environ})
 
   params = Params()
+  mazda_stop_gate = StockEcuHandBackGate(params)
 
   ignore: list[str] = []
   from openpilot.starpilot.connect.provider import active_provider
@@ -209,8 +211,10 @@ def manager_thread() -> None:
         params.put("LastManagerExitReason", f"{param} {datetime.datetime.now()}", block=True)
         cloudlog.warning(f"Shutting down manager - {param} set")
 
-    if shutdown:
+    if shutdown and (not started or not mazda_handback_required(params) or mazda_stop_gate.ready(True)):
       break
+    if not shutdown:
+      mazda_stop_gate.reset()
 
 
 def main() -> None:
