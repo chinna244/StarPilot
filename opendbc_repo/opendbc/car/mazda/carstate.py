@@ -4,6 +4,7 @@ from opendbc.car import Bus, DT_CTRL, create_button_events, structs, uds
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.mazda.radar_session import RadarSessionManager
+from opendbc.car.mazda.stock_aol import native_lateral_pause
 from opendbc.car.mazda.values import DBC, LKAS_LIMITS, CarControllerParams, MazdaFlags
 from opendbc.car.mazda.carstate_ext import CarStateExt
 from opendbc.car.mazda.mads import MadsCarState
@@ -193,10 +194,12 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
 
   def update(self, can_parsers):
     ret, self.out_sp = self.update_with_context(can_parsers)
-    # StarPilot's native owner pauses on raw LKAS_BLOCK. Publish the same pause
-    # immediately so its denied output cannot be mistaken for a lost physical grant.
-    if self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS:
-      ret.steerFaultTemporary |= self.lkas_blocked
+    # Without StarPilot's native lateral owner, steerFaultTemporary keeps the source's semantics: partial
+    # delivery steers, the re-arm block is exempt, only sustained road-speed zero delivery is a fault.
+    # With it (AOL), mazda_aol_permission withholds all lateral torque on raw LKAS_BLOCK, so steering is
+    # truly unavailable and AOL's EPS-pause retention proves the pause through this flag.
+    if native_lateral_pause(self.CP, self):
+      ret.steerFaultTemporary = True
     return ret
 
   def update_with_context(self, can_parsers) -> tuple[structs.CarState, context.CarStateSP]:

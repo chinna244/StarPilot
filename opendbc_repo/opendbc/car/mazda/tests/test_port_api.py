@@ -27,7 +27,9 @@ def test_standard_parser_preserves_blind_spot_signals():
   assert state.leftBlindspot and not state.rightBlindspot
 
 
-def test_standard_parser_exposes_raw_eps_pause_to_the_native_permission_owner():
+def test_standard_parser_keeps_a_raw_eps_block_out_of_the_steering_fault():
+  # The native owner's raw pause is card's view (stock_aol.native_lateral_pause); a single raw block is
+  # not a steerFaultTemporary (test_mazda_production_eps covers delivery, re-arm and the delayed fault).
   cp = CarInterface.get_params(CAR.MAZDA_CX5_2022, gen_empty_fingerprint(), [], False, False, False)
   ci = CarInterface(cp)
   packer = CANPacker('mazda_2017')
@@ -35,6 +37,4 @@ def test_standard_parser_exposes_raw_eps_pause_to_the_native_permission_owner():
   blocked = packer.make_can_msg('STEER_RATE', 0, {'LKAS_BLOCK': 1})
   state = ci.update([(100_000_000, [blocked])])
   assert ci.CS.lkas_blocked and not ci.CS.steer_undelivered_alert
-  assert state.steerFaultTemporary
-  clear = packer.make_can_msg('STEER_RATE', 0, {'LKAS_BLOCK': 0})
-  assert not ci.update([(110_000_000, [clear])]).steerFaultTemporary
+  assert not state.steerFaultTemporary

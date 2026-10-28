@@ -28,6 +28,12 @@ def temporary_restriction(cp, state):
                                                  state.steerFaultTemporary or state.standstill or (cp.minSteerSpeed > 0 and state.vEgo < cp.minSteerSpeed)))
 
 
+def native_lateral_pause(cp, carstate) -> bool:
+  """mazda_aol_permission withholds lateral while 0x241 LKAS_BLOCK is raised: true only while that
+  native owner is active (AOL marked), from the interface's raw parse of the same frame."""
+  return bool(qualified(cp, marked_only=True) and getattr(carstate, 'lkas_blocked', False))
+
+
 def native_observation(native, *, latched, panda_ready, restricted, now_ns, pending_since_ns):
   lost = not panda_ready or native is None
   if not latched or lost or restricted:
