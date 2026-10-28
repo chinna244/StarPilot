@@ -90,7 +90,8 @@ class TestStockEcuHandBackGate:
       assert not gate.ready(started=True, hold_on_failure=hold)
       clock.t = HANDBACK_WAIT_T + 0.1
       assert gate.ready(started=True, hold_on_failure=hold)
-      assert not params.get_bool(FAILED_KEY)  # nobody answered: the radar's state is unknown
+      # nobody answered and card left no status: the radar may be left off, so the stop leaves evidence
+      assert params.get_bool(FAILED_KEY)
 
   def test_going_offroad_mid_wait_releases(self):
     gate, params, _ = _gate()

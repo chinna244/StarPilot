@@ -140,6 +140,9 @@ class SelfdriveD:
     self.conditional_result = ConsumerResult(False, False, 'disabled')
 
     self.car_events = CarEvents(self.CP)
+    # Mazda alpha long's radar transition, read by params_thread: display evidence only
+    self.mazda_stock_ecu = None
+    self.mazda_handback_failed = False
     from openpilot.starpilot.car.tesla.stock_events import StockCruiseConsumer
     self.tesla_stock_consumer = StockCruiseConsumer(self.CP)
     self.tesla_stock_alerts = []
@@ -331,6 +334,19 @@ class SelfdriveD:
         (CS.brakePressed and (not previous.brakePressed or not CS.standstill)) or \
         (CS.regenBraking and (not previous.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
+
+    self.add_mazda_stock_ecu_events(CS)
+
+  def add_mazda_stock_ecu_events(self, CS):
+    from openpilot.selfdrive.selfdrived.events import STOCK_ECU_PRESS_STATE
+    from openpilot.starpilot.car.mazda.radar_status import stock_ecu_events
+    failed, not_ready = stock_ecu_events(self.CP, self.mazda_stock_ecu, self.mazda_handback_failed,
+                                         CS.buttonEvents, time.monotonic_ns())
+    if failed:
+      self.events.add(EventName.stockEcuFailed)
+    if not_ready is not None:
+      STOCK_ECU_PRESS_STATE[0] = not_ready
+      self.events.add(EventName.stockEcuNotReady)
 
 
   def update_events(self, CS):
@@ -2152,6 +2168,11 @@ class SelfdriveD:
       self.nostalgia_enabled = nostalgia_saved_enabled(self.params)
       self.refresh_saved_driving_mode(time.monotonic_ns())
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
+      if self.CP.brand == "mazda" and self.CP.openpilotLongitudinalControl:
+        from openpilot.starpilot.car.mazda.radar_status import read as read_mazda_radar_status
+        from openpilot.starpilot.car.stock_ecu_handback import FAILED_KEY
+        self.mazda_stock_ecu = read_mazda_radar_status(self.params)
+        self.mazda_handback_failed = self.params.get_bool(FAILED_KEY)
       time.sleep(0.1)
 
   def run(self):

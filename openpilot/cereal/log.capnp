@@ -129,6 +129,8 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     aeb @92;
     userBookmark @95;
     userBookmarkNotPaired @104;
+    stockEcuNotReady @105;
+    stockEcuFailed @106;
     excessiveActuation @96;
     bigModelLoading @100;
     bigModelFailed @102;

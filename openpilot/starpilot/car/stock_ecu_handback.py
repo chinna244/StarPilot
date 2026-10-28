@@ -27,9 +27,11 @@ cannot be taken over again in the gap between manager's offroad clear and card's
 A stop that can be withdrawn (forced offroad, through its exit button) proceeds only on
 restored or notNeeded and stays open on failed: the vehicle keeps neutral replacement traffic
 going and a late recovery still completes it. A stop with no cancel (cycle, reboot, shutdown,
-uninstall) proceeds on any answer, and on failed leaves FAILED_KEY for the next session's
-alert (only an onroad cycle keeps it: manager start and ignition clear it). Either proceeds after HANDBACK_WAIT_T with no answer at all,
-which means no card is alive to give one. Ignition off and power loss cannot be held.
+uninstall) proceeds on any answer, and on failed leaves FAILED_KEY for the alert. Either proceeds
+after HANDBACK_WAIT_T with no answer at all, which means no card is alive to give one; it leaves
+FAILED_KEY too when card's last status had the radar off. FAILED_KEY is persistent and clears only
+when manager observes the ignition off (the radar's degraded state lasts until then), so a reboot
+or shutdown with the ignition on keeps it. Ignition off and power loss cannot be held.
 """
 import time
 import capnp
@@ -113,7 +115,10 @@ class StockEcuHandBackGate:
           return True
         return False  # held open; a late recovery or a withdrawal ends it
     if self.now() - self.requested_ts > HANDBACK_WAIT_T:
-      cloudlog.error(f"stock ECU hand-back {self.request_id} unanswered, ending onroad anyway")
+      left_off = radar_left_off(self.params)
+      cloudlog.error(f"stock ECU hand-back {self.request_id} unanswered, ending onroad anyway (radar left off: {left_off})")
+      if left_off:
+        self.params.put_bool(FAILED_KEY, True, block=True)
       self._close()
       return True
     return False
@@ -169,6 +174,25 @@ class StockEcuHandBackServer:
     CC_SP.stockEcuHandBack = True
     if state in ANSWERS:
       self._answer(request_id, state)
+
+
+def radar_left_off(params) -> bool:
+  """Card's last word on this session's radar (any age: card may be gone). Off, or owned/mid-return,
+  means the stop leaves it to recover unattended; no record at all is assumed off."""
+  status = params.get("MazdaStockEcuStatus")
+  if isinstance(status, dict) and type(status.get("radarOff")) is bool:
+    return status["radarOff"] or status.get("state") in (StockEcuState.READY, StockEcuState.RESTORING, StockEcuState.FAILED)
+  return params.get("MazdaStockEcuState") not in (StockEcuState.RESTORED, StockEcuState.NOT_NEEDED,
+                                                   StockEcuState.STARTING, StockEcuState.PARK_TO_TAKE_OVER,
+                                                   StockEcuState.STOCK_CRUISE_ON)
+
+
+def clear_handback_failure_on_ignition_off(params, panda_states) -> None:
+  """manager: a failed hand-back lasts until the car's ignition is seen off by a known panda."""
+  from openpilot.cereal import log
+  known = [ps for ps in panda_states if ps.pandaType != log.PandaState.PandaType.unknown]
+  if known and not any(ps.ignitionLine or ps.ignitionCan for ps in known) and params.get_bool(FAILED_KEY):
+    params.remove(FAILED_KEY)
 
 
 def mazda_handback_required(params) -> bool:

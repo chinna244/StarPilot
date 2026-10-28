@@ -10,7 +10,7 @@ from openpilot.starpilot.drive_state.owner import DriveStateOwner
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
 from openpilot.common.utils import atomic_write
-from openpilot.starpilot.car.stock_ecu_handback import StockEcuHandBackGate, mazda_handback_required
+from openpilot.starpilot.car.stock_ecu_handback import StockEcuHandBackGate, clear_handback_failure_on_ignition_off, mazda_handback_required
 from openpilot.common.params import Params, ParamKeyFlag, UnknownKeyName
 from openpilot.common.text_window import TextWindow
 from openpilot.common.hardware import HARDWARE, PC
@@ -174,6 +174,7 @@ def manager_thread() -> None:
     ignition = any(ps.ignitionLine or ps.ignitionCan for ps in sm['pandaStates'] if ps.pandaType != log.PandaState.PandaType.unknown)
     if ignition and not ignition_prev:
       params.clear_all(ParamKeyFlag.CLEAR_ON_IGNITION_ON)
+    clear_handback_failure_on_ignition_off(params, sm['pandaStates'])
 
     # update offroad state for services that don't subscribe to deviceState
     if started != started_prev:

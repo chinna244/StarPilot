@@ -243,6 +243,16 @@ def startup_master_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubM
 
   return StartupAlert("WARNING: This branch is not tested", branch, alert_status=AlertStatus.userPrompt)
 
+def stock_ecu_not_ready_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  from openpilot.starpilot.car.mazda.radar_status import not_ready_text
+  title, line = not_ready_text(STOCK_ECU_PRESS_STATE[0])
+  return Alert(title, line, AlertStatus.normal, AlertSize.mid, Priority.MID, VisualAlert.none, AudibleAlert.refuse, 3.)
+
+
+# The stock ECU state the last stockEcuNotReady press named; set by selfdrived as it adds the event.
+STOCK_ECU_PRESS_STATE: list[str | None] = [None]
+
+
 def below_engage_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   return NoEntryAlert(f"Drive above {get_display_speed(CP.minEnableSpeed, metric)} to engage")
 
@@ -753,6 +763,19 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   EventName.carNotReady: {
     ET.NO_ENTRY: NoEntryAlert("Car Not Ready"),
+  },
+
+  # Mazda alpha long: a SET/RES press the car will not engage on while openpilot does not own the
+  # radar or it is being returned. PERMANENT so it reaches a driver with nothing engaged; it grants
+  # and blocks nothing (the press itself does nothing on the car).
+  EventName.stockEcuNotReady: {
+    ET.PERMANENT: stock_ecu_not_ready_alert,
+  },
+
+  # The factory radar was not returned, this drive or at the stop that ended the last one: AEB is off
+  # and stock cruise is blocked until the car is restarted. Display evidence only.
+  EventName.stockEcuFailed: {
+    ET.PERMANENT: NormalPermanentAlert("Factory Radar Not Restored", "AEB off: restart the car", priority=Priority.MID),
   },
 
   EventName.wrongCruiseMode: {
