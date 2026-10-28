@@ -984,6 +984,10 @@ class SafetyTest(SafetyTestBase):
               continue
             if attr.startswith('TestHyundaiCanfd') and current_test.startswith('TestHyundaiCanfd'):
               continue
+            # Mazda words share one command family: an [addr, bus] the current word also sends is proven by
+            # that word's own tests, while an address only another word sends must still be rejected.
+            if attr.startswith('TestMazda') and current_test.startswith('TestMazda'):
+              tx = [m for m in tx if m[:2] not in self.TX_MSGS]
             if {attr, current_test}.issubset({'TestHyundaiLongitudinalSafety', 'TestHyundaiLongitudinalSafetyCameraSCC',
                                               'TestHyundaiLongitudinalSafetyCameraSCCRefresh',
                                               'TestHyundaiLongitudinalSafetyCameraSCCRefreshHybrid', 'TestHyundaiSafetyFCEVLong'}):
