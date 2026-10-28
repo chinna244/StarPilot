@@ -10,6 +10,8 @@ venv/
 .overlay_init
 .overlay_consistent
 .sconsign.dblite
+.build_stamp.json
+.build_stamp.json.tmp
 a.out
 .hypothesis
 .cache/

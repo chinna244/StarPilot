@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import subprocess
 
@@ -8,9 +9,66 @@ from openpilot.common.spinner import Spinner
 from openpilot.common.text_window import TextWindow
 from openpilot.common.hardware import HARDWARE, AGNOS
 
+# A source build tracks some build outputs in git. SCons (Decider MD5-timestamp) never re-checks a
+# target's own content, so once an update's `git reset --hard`, a checkout or a copy restores those
+# files, .sconsign still vouches for them. The stamp records what the last successful build left; any
+# other state discards .sconsign and every target is rebuilt (the CacheDir still serves unchanged ones).
+STAMP = ".build_stamp.json"
+SCONSIGN = ".sconsign.dblite"
+OUTPUT_SUFFIXES = (".so", ".a", ".o", ".bin", ".signed", ".elf")
+
+
+def build_state(basedir: str = BASEDIR) -> dict | None:
+  """HEAD and every tracked build output as (size, mtime); None when git cannot say."""
+  try:
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=basedir, text=True).strip()
+    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=basedir, text=True).split("\0")
+  except (OSError, subprocess.CalledProcessError):
+    return None
+  outputs = {}
+  for name in tracked:
+    if name.endswith(OUTPUT_SUFFIXES) or os.path.basename(name) == "pandad":
+      try:
+        st = os.stat(os.path.join(basedir, name))
+        outputs[name] = [st.st_size, st.st_mtime_ns]
+      except FileNotFoundError:
+        outputs[name] = None
+  return {"head": head, "outputs": outputs}
+
+
+def invalidate_stale_outputs(basedir: str = BASEDIR) -> bool:
+  """Drop .sconsign unless the tree is exactly what the last successful build left. True if dropped."""
+  try:
+    with open(os.path.join(basedir, STAMP)) as f:
+      recorded = json.load(f)
+  except (OSError, ValueError):
+    recorded = None
+  state = build_state(basedir)
+  if state is not None and recorded == state:
+    return False
+  for name in (SCONSIGN, STAMP):
+    try:
+      os.remove(os.path.join(basedir, name))
+    except FileNotFoundError:
+      pass
+  return True
+
+
+def record_build(basedir: str = BASEDIR) -> None:
+  state = build_state(basedir)
+  if state is not None:
+    tmp = os.path.join(basedir, STAMP + ".tmp")
+    with open(tmp, "w") as f:
+      json.dump(state, f)
+    os.replace(tmp, os.path.join(basedir, STAMP))
+
+
 def build() -> None:
   spinner = Spinner()
   spinner.update_progress(0, 100)
+
+  if invalidate_stale_outputs():
+    print("build: tracked outputs differ from the last build of this tree; rebuilding every target")
 
   HARDWARE.set_power_save(False)
   if AGNOS:
@@ -50,6 +108,8 @@ def build() -> None:
     if scons.returncode == 0:
       break
 
+  if scons.returncode == 0:
+    record_build()
   os.sync()
 
   if scons.returncode != 0:
