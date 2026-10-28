@@ -124,7 +124,12 @@ function launch {
   # start manager
   cd openpilot/system/manager
   if [ ! -f "$DIR/prebuilt" ]; then
-    ./build.py
+    # build.py has already shown its error window and retried serially; never start
+    # manager on stale or partially rebuilt components.
+    if ! ./build.py; then
+      echo "openpilot build failed; manager not started"
+      while true; do sleep 1; done
+    fi
   fi
   ./manager.py
 
