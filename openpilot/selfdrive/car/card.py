@@ -1544,30 +1544,38 @@ class Car:
       time.sleep(.01)
     return False
 
+  def mazda_handback_server(self) -> StockEcuHandBackServer | None:
+    if not (self.CP.brand == "mazda" and self.CP.openpilotLongitudinalControl):
+      return None
+    if getattr(self, 'mazda_handback', None) is None:
+      self.mazda_handback = StockEcuHandBackServer(self.params)
+      self.mazda_ecu_status = None
+      self.mazda_status_payload = None
+      self.mazda_status_written_ns = 0
+    return self.mazda_handback
+
+  def mazda_handback_update(self, CC: car.CarControl) -> None:
+    """Mazda alpha long: assert the radar hand-back while a stop's request stands (polled by params_thread)."""
+    server = self.mazda_handback_server()
+    if server is None:
+      return
+    controller = self.CI.CC
+    controller.control_context.stockEcuHandBack = False
+    server.update(CC.enabled, controller.stock_ecu_state, controller.control_context)
+    status = str(controller.stock_ecu_state)
+    if status != self.mazda_ecu_status:
+      self.params.put("MazdaStockEcuState", status)
+      self.mazda_ecu_status = status
+    payload = {"state": status, "radarOff": bool(controller.stock_ecu_off),
+               "alphaRequested": bool(controller.alpha_long_requested), "fingerprint": str(self.CP.carFingerprint)}
+    now_ns = time.monotonic_ns()
+    if payload != self.mazda_status_payload or now_ns - self.mazda_status_written_ns >= 1_000_000_000:
+      self.params.put("MazdaStockEcuStatus", {**payload, "monoTime": now_ns})
+      self.mazda_status_payload, self.mazda_status_written_ns = payload, now_ns
+
   def controls_update(self, CS: car.CarState, CC: car.CarControl, *, initialize_only=False):
     """control update loop, driven by carControl"""
-    if self.CP.brand == "mazda" and self.CP.openpilotLongitudinalControl:
-      if not hasattr(self, 'mazda_handback'):
-        self.mazda_handback = StockEcuHandBackServer(self.params)
-        self.mazda_ecu_status = None
-        self.mazda_status_payload = None
-        self.mazda_status_written_ns = 0
-      controller = self.CI.CC
-      controller.control_context.stockEcuHandBack = False
-      self.mazda_handback.update_params()
-      self.mazda_handback.update(CC.enabled, controller.stock_ecu_state, controller.control_context)
-      status = str(controller.stock_ecu_state)
-      if status != self.mazda_ecu_status:
-        self.params.put("MazdaStockEcuState", status)
-        self.mazda_ecu_status = status
-      payload = {"state": status, "radarOff": bool(controller.stock_ecu_off),
-                 "alphaRequested": bool(controller.alpha_long_requested), "fingerprint": str(self.CP.carFingerprint)}
-      now_ns = time.monotonic_ns()
-      if payload != self.mazda_status_payload or now_ns - self.mazda_status_written_ns >= 1_000_000_000:
-        self.params.put("MazdaStockEcuStatus", {**payload, "monoTime": now_ns})
-        self.mazda_status_payload, self.mazda_status_written_ns = payload, now_ns
-
-
+    self.mazda_handback_update(CC)
 
     if initialize_only:
       ev6_startup = self.ev6_startup_keepalive()
@@ -1845,6 +1853,9 @@ class Car:
       self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
       if self.aol_card_intent is not None:
         self.aol_card_intent.settings = read_settings(self.params)
+      server = self.mazda_handback_server()
+      if server is not None:
+        server.update_params()
       now = time.monotonic()
       if now >= next_cruise_read:
         self.slc_requested_configuration = self.read_slc_configuration()

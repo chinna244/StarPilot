@@ -18,9 +18,11 @@ Consumer (`StockEcuHandBackGate`, in hardwared and manager): writes StockEcuHand
 arriving while one request is open joins it, so exactly one hand-back is ever in flight.
 Producer (`StockEcuHandBackServer`, in card): asserts the brand's hand-back off the control loop
 while the request stands and writes the result with the vehicle's StockEcuState once it is one
-of restored, failed or notNeeded. Ids are monotonic past every record on file and both records
-clear on the offroad transition, so a stale answer never satisfies a new request, and a
-withdrawn request (the record removed) is a fresh start for the vehicle.
+of restored, failed or notNeeded. Ids are monotonic past every record on file, so a stale answer
+never satisfies a new request, and a withdrawn request (the record removed while onroad) is a fresh
+start for the vehicle. Both records outlive the offroad transition and clear on the next onroad one:
+a stop's answered request keeps card asserting the hand-back until card exits, so a restored ECU
+cannot be taken over again in the gap between manager's offroad clear and card's shutdown.
 
 A stop that can be withdrawn (forced offroad, through its exit button) proceeds only on
 restored or notNeeded and stays open on failed: the vehicle keeps neutral replacement traffic
@@ -138,7 +140,7 @@ class StockEcuHandBackServer:
     self.answered: tuple[int, StockEcuState] | None = None
 
   def update_params(self) -> None:
-    # rides card's 10 Hz params thread
+    # card's 10 Hz params_thread; the control loop reads only the attribute
     self.request = read_record(self.params, REQUEST_KEY)
 
   def _answer(self, request_id: int, outcome: StockEcuState) -> None:
