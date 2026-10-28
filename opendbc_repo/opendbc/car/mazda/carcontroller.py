@@ -15,6 +15,7 @@ from opendbc.car.mazda.values import CarControllerParams, Buttons, MazdaFlags
 from opendbc.car.mazda.icbm import IntelligentCruiseButtonManagementInterface
 from opendbc.car.mazda.mads import MadsCarController
 from opendbc.car.mazda.stock_ecu import StockEcuState
+from opendbc.car.mazda.stock_aol import qualified as qualified_aol
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 LongCtrlState = structs.CarControl.Actuators.LongControlState
@@ -145,9 +146,12 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.dash_warning_on_bus = False
 
   def update(self, CC, CS, now_nanos):
-    self.control_context.mads.available = not self.CP.passive and not CS.out.steerFaultPermanent
-    self.control_context.mads.enabled = CC.latActive
-    self.control_context.mads.active = CC.latActive
+    # StarPilot's native lateral owner (AOL) stands in for the source's MADS: without it there is no
+    # independent lateral, so ordinary engaged lateral must not draw the MADS white wheel or rearm.
+    mads = qualified_aol(self.CP, marked_only=True)
+    self.control_context.mads.available = mads and not self.CP.passive and not CS.out.steerFaultPermanent
+    self.control_context.mads.enabled = mads and CC.latActive
+    self.control_context.mads.active = mads and CC.latActive
     return self.update_with_context(CC, self.control_context, CS, now_nanos)
 
   def update_with_context(self, CC, CC_SP, CS, now_nanos):

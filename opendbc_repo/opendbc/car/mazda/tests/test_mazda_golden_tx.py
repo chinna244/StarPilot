@@ -15,15 +15,21 @@ Every tx frame (address, bus, bytes) and the reported actuator outputs are hashe
 frame and compared against the checked-in fixture. Any change to what goes on the wire, in
 any of those states, fails here with the phase and the frame that moved.
 
-That scenario seeds CarState attributes directly. The full-stack scenarios below feed synthetic
-CAN through CarInterface.update and apply, and every frame through the panda's safety model, so
-carstate, the interface and mazda.h are pinned too, on each configuration the port treats
-differently: alpha long, stock long, the legacy-firmware EPS, the G46L radar, the TJA button
-with the MADS white wheel.
+That scenario is a source-algorithm unit test: it seeds CarState attributes and hands the
+controller an explicit CarControlSP, as the source does.
 
-Regenerate the fixtures only for a deliberate behavior change:
+The full-stack scenarios below are the production integration test. They feed synthetic CAN through
+the unmodified CarInterface.update and apply, with only the card's hand-back request set on the
+controller's context, and every frame through the panda's safety model, so carstate, the interface
+and mazda.h are pinned on each configuration the port treats differently: alpha long, stock long,
+the legacy-firmware EPS, the G46L radar, the TJA button with AOL's white wheel.
 
-  python opendbc/car/mazda/tests/test_mazda_golden_tx.py --update [--dump PATH]
+Both fixtures are the pinned source's own (chinna244/openpilot opendbc 7b96732d), byte for byte. The
+stack replay is compared with the source fixture after two documented native-API mappings
+(source_semantics) and with exactly the frames in STACK_SOURCE_EXCEPTIONS differing. They are never
+regenerated here; `--dump PATH` writes this tree's records for investigation.
+
+  python opendbc/car/mazda/tests/test_mazda_golden_tx.py --dump PATH
 """
 import functools
 import hashlib
@@ -46,7 +52,7 @@ from opendbc.safety.tests.libsafety import libsafety_py
 from opendbc.car.mazda.values_ext import MazdaFlagsSP, MazdaSafetyFlagsSP
 
 FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mazda_golden_tx.json")
-STACK_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mazda_starpilot_golden_stack.json")
+STACK_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mazda_golden_stack.json")
 HASH_CHARS = 12
 STACK_HASH_CHARS = 10
 
@@ -393,9 +399,18 @@ def carstate_record(ci, cs, cs_sp, safety) -> dict:
 STACK_CC = dict(enabled=False, long_active=False, lat_active=False, accel=0., long_state=LongCtrlState.off, lead_visible=False, gap=2)
 
 
+# Card-provided controller context; everything else on CarControlSP is derived by the production
+# CarController.update (StarPilot plumbs no ICBM button, and MADS is AOL's lateral). The scripts' lead
+# inputs are not read by the Mazda controller (no CarControlSP.leadOne/leadTwo reader).
+PRODUCTION_CC_SP_KEYS = {"handback", "mads_active", "send_button", "lead_d_rel", "lead_v_rel"}
+
+
 def run_stack(ci, phases, mads=False):
-  """One configuration: per control frame, the car's frames reach the panda and carstate, the controller
-  answers, and the panda judges every frame it sends. Its refusals come back on src 192 as on the car."""
+  """One configuration through the production path: per control frame, the car's frames reach the panda
+  and carstate, CarInterface.apply answers, and the panda judges every frame it sends. Its refusals come
+  back on src 192 as on the car. `mads` is StarPilot's AOL: card marks the CP it shares with the interface."""
+  if mads:
+    ci.CP.alternativeExperience = 32
   sim = SimCar()
   safety = libsafety_py.libsafety
   safety.set_alternative_experience(32 if mads else 0)
@@ -416,6 +431,7 @@ def run_stack(ci, phases, mads=False):
             kwargs[k] = v
         cc_kw, cc_sp_kw, cs_kw = split_inputs(kwargs)
         assert not cs_kw, f"not a car or CarControl input: {cs_kw}"
+        assert set(cc_sp_kw) <= PRODUCTION_CC_SP_KEYS, f"not produced on the production path: {cc_sp_kw}"
         t = int(sim.frame * DT_CTRL * 1e9)
 
         safety.set_timer(sim.frame * 10_000)
@@ -431,7 +447,8 @@ def run_stack(ci, phases, mads=False):
 
         cs = ci.update([(t, msgs + loopback)])
         cs_sp = ci.CS.out_sp
-        actuators, sends = ci.CC.update_with_context(car_control(**cc_kw), car_control_sp(**cc_sp_kw), ci.CS, t)
+        ci.CC.control_context.stockEcuHandBack = bool(cc_sp_kw.get("handback", False))  # card's hand-back server
+        actuators, sends = ci.apply(car_control(**cc_kw), t)
         allowed = [bool(safety.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus, dat))) for addr, dat, bus in sends]
         loopback = [(addr, dat, bus + 192) for (addr, dat, bus), ok in zip(sends, allowed, strict=True) if not ok]
         yield {
@@ -559,19 +576,54 @@ def stack_records(name) -> list:
   return list(run_stack(make_ci(), phases, mads))
 
 
+def source_semantics(rec, mads: bool) -> dict:
+  """Express the port's panda observation in the source's terms; every other field is compared as is.
+
+  pandaLateral: the source records sunnypilot's controls_allowed_lateral, MADS's own lateral flag, False
+  without MADS. The port records lateral_controls_allowed(), which without AOL is controls_allowed (the
+  same authority the source's TX gate grants: controls_allowed_lateral || controls_allowed && !MADS).
+  pandaMain: with the TJA button the source leaves acc_main_on alone (MADS needs no main); StarPilot's
+  AOL permission requires it, so mazda_port.h holds it on while TJA owns lateral.
+  """
+  cs = dict(rec["cs"])
+  if mads:
+    cs["pandaMain"] = False
+  else:
+    assert cs["pandaLateral"] == cs["pandaControls"]
+    cs["pandaLateral"] = False
+  return dict(rec, cs=cs)
+
+
+# Frames where the production stack legitimately differs from the source fixture, checked below.
+STACK_SOURCE_EXCEPTIONS = {
+  # StarPilot plumbs no ICBM button: the source's two synthesized SET+ taps are not sent.
+  "stock_long_cx5_2022": {1430, 1451},
+  # mazda_aol_grant: a physical TJA grant waits for a strictly later host request, so the panda refuses
+  # openpilot's zero-torque 0x243/0x440 and forwards the camera's for those frames.
+  "tja_mads_cx5_2022": {50, 51, 52, 53, 54},
+}
+
+
 @pytest.mark.parametrize("name", STACK_CONFIGS)
-def test_stack_matches(name):
+def test_stack_matches_the_source_fixture(name):
   fixture = load_fixture(STACK_FIXTURE)[name]
-  _, phases, _ = STACK_CONFIGS[name]
+  _, phases, mads = STACK_CONFIGS[name]
   assert [p["name"] for p in fixture["phases"]] == [p[0] for p in phases]
   records = stack_records(name)
   assert len(records) == fixture["frames"]
-  for rec, expected in zip(records, fixture["hashes"], strict=True):
-    if frame_hash(rec, STACK_RECORD_KEYS, STACK_HASH_CHARS) != expected:
-      key = fixture["keyframes"].get(str(rec["frame"]))
-      golden = f"\ngolden keyframe: {json.dumps(key)}" if key else ""
-      now = json.dumps({k: rec[k] for k in STACK_RECORD_KEYS})
-      raise AssertionError(f"{name} diverged at frame {rec['frame']} ({rec['phase']}):\nnow: {now}{golden}")
+  differing = {rec["frame"] for rec, expected in zip(records, fixture["hashes"], strict=True)
+               if frame_hash(source_semantics(rec, mads), STACK_RECORD_KEYS, STACK_HASH_CHARS) != expected}
+  assert differing == STACK_SOURCE_EXCEPTIONS.get(name, set())
+  for rec in records:
+    if rec["frame"] not in differing:
+      continue
+    if name == "stock_long_cx5_2022":
+      assert rec["phase"] == "icbm_tap" and not any(a == 0x9d for a, _, _, _ in rec["tx"])
+    else:
+      assert rec["phase"] == "tja_press_arms_mrcc" and not rec["cs"]["pandaLateral"]
+      lka = [(a, d, ok) for a, b, d, ok in rec["tx"] if a in (0x243, 0x440) and b == 0]
+      assert lka and not any(ok for _, _, ok in lka)
+      assert all((((bytes.fromhex(d)[0] & 15) << 8) | bytes.fromhex(d)[1]) == 2048 for a, d, _ in lka if a == 0x243)
 
 
 def test_stack_reaches_every_state():
@@ -598,7 +650,7 @@ def test_stack_reaches_every_state():
   assert any(cs(phase(stock, "eps_undelivered"), "steerFaultTemporary"))
   assert all(cs(phase(stock, "lane_keep_off"), "invalidLkasSetting")[10:])
   assert any(cs(phase(stock, "lane_keep_back"), "lkasArming"))
-  assert sent(phase(stock, "resume_button"), 0x9d) and sent(phase(stock, "icbm_tap"), 0x9d)
+  assert sent(phase(stock, "resume_button"), 0x9d) and not sent(phase(stock, "icbm_tap"), 0x9d)  # no ICBM in StarPilot
   assert sent(phase(stock, "brake_cancels"), 0x9d) and sent(phase(alpha, "brake_cancels"), 0x9d)
   # legacy firmware: the speed floor's alert and its block fault
   legacy = "legacy_eps_cx9_2021"
@@ -615,19 +667,11 @@ def test_stack_reaches_every_state():
 
 
 if __name__ == "__main__":
-  if "--update" not in sys.argv:
+  # The fixtures are the pinned source's; this tree only dumps its own records for investigation.
+  if "--dump" not in sys.argv:
     print(__doc__)
     sys.exit(1)
-  recs = list(run_scenario())
-  with open(FIXTURE, "w") as f:
-    json.dump(build_fixture(recs), f, separators=(",", ":"))
-  print(f"wrote {FIXTURE}: {len(recs)} frames, {os.path.getsize(FIXTURE)} bytes")
-  stack = {name: build_fixture(stack_records(name), STACK_RECORD_KEYS, STACK_HASH_CHARS) for name in STACK_CONFIGS}
-  with open(STACK_FIXTURE, "w") as f:
-    json.dump(stack, f, separators=(",", ":"))
-  print(f"wrote {STACK_FIXTURE}: {sum(c['frames'] for c in stack.values())} frames, {os.path.getsize(STACK_FIXTURE)} bytes")
-  if "--dump" in sys.argv:
-    dump = sys.argv[sys.argv.index("--dump") + 1]
-    with open(dump, "w") as f:
-      json.dump(recs, f)
-    print(f"wrote {dump}: {os.path.getsize(dump)} bytes")
+  dump = sys.argv[sys.argv.index("--dump") + 1]
+  with open(dump, "w") as f:
+    json.dump({"scenario": list(run_scenario()), "stack": {name: stack_records(name) for name in STACK_CONFIGS}}, f)
+  print(f"wrote {dump}")

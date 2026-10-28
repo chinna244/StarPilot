@@ -94,22 +94,17 @@ def car_interface(alpha_long=True, candidate=CAR.MAZDA_CX5_2022, car_fw=None) ->
   CP = car_params(candidate, alpha_long=alpha_long, car_fw=car_fw)
   CP_SP = car_params_sp(CP, candidate, alpha_long=alpha_long, car_fw=car_fw)
 
-  class ContextTestCarState(CarState):
-    def update(self, parsers):
-      # Upstream context regressions exercise the preserved delayed-warning algorithm.
-      # StarPilot's public raw-pause translation is covered separately in test_port_api.
-      ret, self.out_sp = self.update_with_context(parsers)
-      return ret
-
-  class ContextTestInterface(CarInterface):
-    CarState = ContextTestCarState
+  class SourceContextInterface(CarInterface):
+    """Source-algorithm harness: the production CarState, with the controller handed an explicit
+    CarControlSP as the source does. Production integration (CarInterface.apply deriving the context)
+    is test_mazda_golden_tx's stack replay, test_mazda_production_eps and test_native_engagement_callers."""
 
     def apply(self, cc, cc_sp, now=None):
       return self.CC.update_with_context(cc, cc_sp, self.CS, now or 0)
 
     def update(self, packets):
       return super().update(packets), getattr(self.CS, 'out_sp', context.CarStateSP())
-  return ContextTestInterface(CP, CP_SP)
+  return SourceContextInterface(CP, CP_SP)
 
 
 def car_controller(alpha_long=True, candidate=CAR.MAZDA_CX5_2022, cruise_requested=True) -> CarController:
