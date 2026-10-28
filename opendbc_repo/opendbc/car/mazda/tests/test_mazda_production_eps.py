@@ -115,3 +115,14 @@ def test_native_owner_pause_is_published_only_under_aol():
   ci, sim = production_interface(), DeliveringSimCar(delivered=0.4)
   settled(ci, sim)
   assert not any(fault for fault, _, _ in drive(ci, sim, 50, lkas_block=True))
+
+
+def test_legacy_firmware_under_aol_keeps_the_speed_gated_rule():
+  # older EPS firmware raises LKAS_BLOCK below its 45 kph floor by design; AOL's restriction covers it
+  cp = car_params(CAR.MAZDA_CX9_2021)
+  assert cp.flags & MazdaFlags.LEGACY_FW_EPS
+  cp.alternativeExperience = 32
+  ci, sim = CarInterface(cp), DeliveringSimCar()
+  drive(ci, sim, 200, v=8., lkas_block=False)
+  assert not any(fault for fault, _, _ in drive(ci, sim, 100, v=8., lkas_block=True))
+  assert not native_lateral_pause(ci.CP, ci.CS)

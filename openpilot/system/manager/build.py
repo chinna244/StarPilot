@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import subprocess
 
 # NOTE: Do NOT import anything here that needs be built (e.g. params)
@@ -16,18 +17,23 @@ from openpilot.common.hardware import HARDWARE, AGNOS
 STAMP = ".build_stamp.json"
 SCONSIGN = ".sconsign.dblite"
 OUTPUT_SUFFIXES = (".so", ".a", ".o", ".bin", ".signed", ".elf")
+VERSIONED_SO = re.compile(r"\.so(\.\d+)+$")
 
 
 def build_state(basedir: str = BASEDIR) -> dict | None:
   """HEAD and every tracked build output as (size, mtime); None when git cannot say."""
   try:
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=basedir, text=True).strip()
-    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=basedir, text=True).split("\0")
+    staged = subprocess.check_output(["git", "ls-files", "-s", "-z"], cwd=basedir, text=True).split("\0")
   except (OSError, subprocess.CalledProcessError):
     return None
   outputs = {}
-  for name in tracked:
-    if name.endswith(OUTPUT_SUFFIXES) or os.path.basename(name) == "pandad":
+  for entry in filter(None, staged):
+    meta, name = entry.split("\t", 1)
+    mode = meta.split(" ", 1)[0]
+    base = os.path.basename(name)
+    # libraries (incl. versioned .so.N), objects, firmware, and extensionless executables (camerad, pandad, ...)
+    if name.endswith(OUTPUT_SUFFIXES) or VERSIONED_SO.search(base) or (mode == "100755" and "." not in base):
       try:
         st = os.stat(os.path.join(basedir, name))
         outputs[name] = [st.st_size, st.st_mtime_ns]

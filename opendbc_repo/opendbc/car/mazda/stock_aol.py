@@ -31,8 +31,11 @@ def temporary_restriction(cp, state):
 
 def native_lateral_pause(cp, carstate) -> bool:
   """mazda_aol_permission withholds lateral while 0x241 LKAS_BLOCK is raised: true only while that
-  native owner is active (AOL marked), from the interface's raw parse of the same frame."""
-  return bool(qualified(cp, marked_only=True) and getattr(carstate, 'lkas_blocked', False))
+  native owner is active (AOL marked), from the interface's raw parse of the same frame. Steer-to-zero
+  firmware only: older firmware raises the block below its 45 kph floor by design, where AOL's own
+  restriction (vEgo < minSteerSpeed) covers it and carstate keeps base StarPilot's speed-gated fault."""
+  return bool(int(cp.flags) & int(MazdaFlags.STEER_TO_ZERO_EPS) and qualified(cp, marked_only=True) and
+              getattr(carstate, 'lkas_blocked', False))
 
 
 def native_observation(native, *, latched, panda_ready, restricted, now_ns, pending_since_ns):

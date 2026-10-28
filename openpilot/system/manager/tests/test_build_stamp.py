@@ -9,7 +9,9 @@ import pytest
 
 from openpilot.system.manager.build import SCONSIGN, STAMP, invalidate_stale_outputs, record_build
 
-OUTPUTS = ("openpilot/common/libparams_c.so", "openpilot/selfdrive/pandad/pandad", "panda/board/obj/panda_h7.bin.signed")
+OUTPUTS = ("openpilot/common/libparams_c.so", "openpilot/selfdrive/pandad/pandad", "panda/board/obj/panda_h7.bin.signed",
+           "openpilot/system/camerad/camerad", "third_party/acados/lib/libqpOASES_e.so.3.1")
+EXECUTABLES = ("openpilot/selfdrive/pandad/pandad", "openpilot/system/camerad/camerad")
 
 
 def git(repo, *args):
@@ -26,6 +28,8 @@ def repo(tmp_path):
     (root / name).parent.mkdir(parents=True, exist_ok=True)
     (root / name).write_bytes(b"committed, built from older source")
   (root / "SConstruct").write_text("# source\n")
+  for name in EXECUTABLES:
+    os.chmod(root / name, 0o755)
   git(root, "add", "-A")
   git(root, "commit", "-qm", "base")
   return root
@@ -72,6 +76,15 @@ def test_updater_copytree_then_reset_to_the_new_revision_forces_a_rebuild(repo, 
   git(staging, "reset", "-q", "--hard", target)
   assert invalidate_stale_outputs(str(staging))
   assert not (staging / SCONSIGN).exists()
+
+
+@pytest.mark.parametrize("name", OUTPUTS)
+def test_restoring_any_kind_of_output_at_the_same_head_forces_a_rebuild(repo, name):
+  # `git checkout -- <path>` (or stash) without moving HEAD: extensionless executables and .so.N included
+  scons_build(repo)
+  git(repo, "checkout", "--", name)
+  assert (repo / name).read_bytes() == b"committed, built from older source"
+  assert invalidate_stale_outputs(str(repo))
 
 
 def test_a_missing_tracked_output_forces_a_rebuild(repo):

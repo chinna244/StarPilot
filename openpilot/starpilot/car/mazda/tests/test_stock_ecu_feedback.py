@@ -94,8 +94,13 @@ def _timed_out_gate(**values):
 def test_unanswered_stop_with_the_radar_off_leaves_failure_evidence():
   params = _timed_out_gate(MazdaStockEcuStatus=record(StockEcuState.READY, radar_off=True))
   assert params.get_bool(FAILED_KEY)
-  # card gone with no status at all: assumed off
-  assert _timed_out_gate().get_bool(FAILED_KEY)
+  # card's last state alone, its status record gone
+  assert _timed_out_gate(MazdaStockEcuState=str(StockEcuState.READY)).get_bool(FAILED_KEY)
+
+
+def test_unanswered_stop_before_card_ran_control_is_not_a_failure():
+  # no status at all: card never ran controls_update, the only place a takeover is commanded
+  assert not _timed_out_gate().get_bool(FAILED_KEY)
 
 
 @pytest.mark.parametrize("state", [StockEcuState.PARK_TO_TAKE_OVER, StockEcuState.RESTORED, StockEcuState.STARTING])

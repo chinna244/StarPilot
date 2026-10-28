@@ -178,13 +178,12 @@ class StockEcuHandBackServer:
 
 def radar_left_off(params) -> bool:
   """Card's last word on this session's radar (any age: card may be gone). Off, or owned/mid-return,
-  means the stop leaves it to recover unattended; no record at all is assumed off."""
+  means the stop leaves it to recover unattended. No record at all means card never ran control,
+  and only control can command a takeover, so the radar was never taken."""
   status = params.get("MazdaStockEcuStatus")
   if isinstance(status, dict) and type(status.get("radarOff")) is bool:
     return status["radarOff"] or status.get("state") in (StockEcuState.READY, StockEcuState.RESTORING, StockEcuState.FAILED)
-  return params.get("MazdaStockEcuState") not in (StockEcuState.RESTORED, StockEcuState.NOT_NEEDED,
-                                                   StockEcuState.STARTING, StockEcuState.PARK_TO_TAKE_OVER,
-                                                   StockEcuState.STOCK_CRUISE_ON)
+  return params.get("MazdaStockEcuState") in (StockEcuState.READY, StockEcuState.RESTORING, StockEcuState.FAILED)
 
 
 def clear_handback_failure_on_ignition_off(params, panda_states) -> None:

@@ -587,6 +587,7 @@ def source_semantics(rec, mads: bool) -> dict:
   """
   cs = dict(rec["cs"])
   if mads:
+    assert cs["pandaMain"], "TJA under AOL holds main for the native permission"
     cs["pandaMain"] = False
   else:
     assert cs["pandaLateral"] == cs["pandaControls"]
