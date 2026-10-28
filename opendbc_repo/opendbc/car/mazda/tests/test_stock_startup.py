@@ -152,7 +152,8 @@ def test_other_mazda_configurations_still_deny_independent_owner(identity):
   from openpilot.starpilot.car.mazda.aol import policy_for
 
   cp = CarInterface.get_params(identity, gen_empty_fingerprint(), [], False, False, False)
-  assert not cp.dashcamOnly and cp.pcmCruise and not cp.openpilotLongitudinalControl
+  assert cp.dashcamOnly and cp.pcmCruise and not cp.openpilotLongitudinalControl  # base admission
+  cp.dashcamOnly = False  # even if admitted, the independent owner is not
   cp.alternativeExperience = 32
   assert not qualified(cp)
   policy = policy_for(cp)

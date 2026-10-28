@@ -7,7 +7,7 @@ from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.mazda.carcontroller import CarController
 from opendbc.car.mazda.carstate import CarState
 from opendbc.car.mazda.radar_interface import RadarInterface
-from opendbc.car.mazda.values import DBC, G46L_RADAR_FW, LKAS_LIMITS, STEER_TO_ZERO_EPS_FW, STEER_TO_ZERO_PLATFORMS, \
+from opendbc.car.mazda.values import CAR, DBC, G46L_RADAR_FW, LKAS_LIMITS, STEER_TO_ZERO_EPS_FW, STEER_TO_ZERO_PLATFORMS, \
   TORQUE_TUNES, CarControllerParams, MazdaFlags, MazdaSafetyFlags, WMI, platform_from_vin
 from opendbc.car.vin import Vin, is_valid_vin
 from opendbc.car.mazda.values_ext import MazdaFlagsSP
@@ -43,6 +43,9 @@ class CarInterface(CarInterfaceBase):
     ret.brand = "mazda"
     ret.deprecated.enableBsm = True
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.mazda)]
+    # StarPilot's admission: only these two control. The source's other platforms (and its new KE and
+    # CX-8 entries) stay dashcam until qualified on this fork (docs/mazda-port/support-matrix.md).
+    ret.dashcamOnly = candidate not in (CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021)
 
     # The G46L is the one radar known never to publish 0x361-0x366 on bus 0: parsing its
     # claimed bus would starve radarTracks behind a parser that never goes valid, so it runs
@@ -73,7 +76,9 @@ class CarInterface(CarInterfaceBase):
     # (its DBC claims a radar bus) or the detected radar is the G46L whose own replay exists.
     # The EPS gate stays: a stock older EPS cuts lateral below 45 kph, so stop-and-go would
     # run unsteered.
-    ret.alphaLongitudinalAvailable = steer_to_zero and (Bus.radar in DBC[candidate] or g46l_radar)
+    # Of the controlling platforms only the CX-5 2022 has been driven with it; a CX-9 2021 EPS swap is not offered.
+    ret.alphaLongitudinalAvailable = (steer_to_zero and (Bus.radar in DBC[candidate] or g46l_radar) and
+                                      candidate != CAR.MAZDA_CX9_2021)
     ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
     if ret.openpilotLongitudinalControl:
       ret.safetyConfigs[0].safetyParam |= MazdaSafetyFlags.LONG.value

@@ -15,7 +15,7 @@ SUPPORTED = (CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021)
 @pytest.mark.parametrize('alpha,release', ((False, False), (True, False), (False, True), (True, True)))
 def test_all_factory_variants_match_the_requested_measured_profile(identity, alpha, release):
   cp = CarInterface.get_params(identity, gen_empty_fingerprint(), [], alpha, release, False)
-  assert not cp.dashcamOnly
+  assert cp.dashcamOnly is (identity not in SUPPORTED)
   assert cp.pcmCruise and cp.mass > 1000
   assert cp.openpilotLongitudinalControl is (alpha and cp.alphaLongitudinalAvailable)
   assert cp.steerActuatorDelay == pytest.approx(0.05) and cp.steerLimitTimer == pytest.approx(0.8)
@@ -117,5 +117,5 @@ def test_all_six_dom_dashboard_identities_observe_without_new_actuation(identity
   message = dashboard.compose(cp, ci.CS, state, None, car_state_stamp=now)
   assert message.starpilotCarState.dashboardStopSign == 1
   assert cp.to_dict() == before
-  assert not cp.dashcamOnly
+  assert cp.dashcamOnly is (identity not in SUPPORTED)
   assert cp.pcmCruise and not cp.openpilotLongitudinalControl

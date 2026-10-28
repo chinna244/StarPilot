@@ -16,35 +16,23 @@ The Mazda stack requires API adaptation rather than a direct cherry-pick: the ve
 ## Implemented behavior
 
 - Imported Mazda fingerprints, firmware identification, DBC signals, measured steering envelope, radar parsing, acceleration shaping, standstill logic and radar session state machine.
-- Retained learning observation and dashboard stop-sign evidence. Stock-long remains available; alpha-long retains the source EPS/radar availability gates and StarPilot's non-release opt-in.
-- Kept the original two-model independent lateral admission (CX-5 2022 and CX-9 2021). Alpha-long independent lateral is admitted only on the qualifying CX-5 2022. Other Mazda platform support comes from the imported vehicle source; independent lateral admission was not widened to those platforms.
-- Safety words 2/3 select measured stock/alpha-long, and 10/11 additionally declare TJA. Legacy word 0 retains its original safety behavior. Reserved bit 4 is unused; invalid profiles have no permitted transmissions.
-- Physical TJA is an immutable startup setting shared by the native UI and Galaxy. Forwarding modifies only the camera-bound button copy, preserving the original receive payload.
-- MAIN/ON, Cancel, brake, reverse and stale-source behavior use StarPilot's native permission checks. A healthy ordinary cruise engagement transfers only its existing physical grant; alpha still requires physical SET/RES. The standard parser exports raw `LKAS_BLOCK` immediately on steer-to-zero EPS firmware to match Panda's pause. This can produce earlier temporary steering warnings than the source's delayed non-delivery warning. The source non-delivery algorithm is retained.
-- Correlated radar handback delays software-initiated stops only for finalized Mazda alpha-long sessions. Other vehicle stops retain their existing behavior. Physical ignition/power loss cannot be delayed.
-- Radar ownership and restoration failures are visible through the existing onroad alert/status path. Status has bounded freshness and vehicle binding, and does not grant driving authority. Alpha-long radar takeover disables factory AEB while active.
+- Retained learning observation and dashboard stop-sign evidence. Stock-long remains available; alpha-long keeps the source EPS/radar gates and StarPilot's non-release opt-in.
+- Admission follows base StarPilot: only the CX-5 2022 and CX-9 2021 control; the source's other platforms (and its new CX-5 KE and CX-8 entries) are dashcam only. Alpha long is offered on the CX-5 2022 only. See [support-matrix.md](support-matrix.md).
+- AOL (independent lateral) is admitted only with stock longitudinal, as in base StarPilot: its native longitudinal bit requires motion, so alpha long's standstill hold would be refused. Safety words in use: 2 (measured EPS), 3 (alpha long), 10 (measured EPS + TJA, AOL only). Word 0 keeps its original behavior; invalid words permit no transmission.
+- Physical TJA is an immutable startup setting shared by the native UI and Galaxy, for AOL on stock longitudinal. Forwarding modifies only the camera-bound button copy.
+- EPS delivery keeps the source's semantics: partial delivery during LKAS_BLOCK steers, the lane-keep re-arm block is exempt, only sustained road-speed zero delivery is a temporary fault. Only while AOL's native owner is active is a raw LKAS_BLOCK published as `steerFaultTemporary`, because that owner then withholds all lateral torque.
+- Correlated radar hand-back delays software-initiated stops for finalized Mazda alpha-long sessions; an answered stop stays asserted until card exits, so a restored radar is not taken over again during the stop. Physical ignition/power loss cannot be delayed.
+- Radar failures reach the driver through selfdrived events (`stockEcuFailed`, `stockEcuNotReady`, display-only) and the onroad notice. An unanswered hand-back leaves persistent failure evidence when the radar may be off; it clears when a panda reports the ignition off.
 
 ## Tests and build boundaries
 
-The original controller and full-stack source fixtures are retained. The original standalone controller fixture covers 1,960 frames; the separate StarPilot context replay fixture covers 7,010 frames. The upstream context harness exercises the preserved source algorithm, while standard API and actual Card/Controls/native safety tests exercise StarPilot's adapter and physical grant handling. No source replay scenario was removed.
+Both pinned source fixtures are byte-for-byte unchanged and exercised. The controller fixture (`mazda_golden_tx.json`) is a source-algorithm unit test. The full-stack replay runs the production `CarInterface.update/apply` and native safety and is compared with the source's own `mazda_golden_stack.json`: 7,003 of 7,010 frames match after two documented native-API mappings, and the 7 differing frames are asserted individually (`STACK_SOURCE_EXCEPTIONS`).
 
-Host tests use real, separately built Params, msgq and acados libraries under Python 3.12; no device binary is replaced by a host build. The three standard debug-signed firmware targets are Panda, panda_h7 and body_h7. Firmware compilation does not establish vehicle calibration or a complete device release.
+Production-path tests also cover EPS delivery on a closed-loop simulated EPS, the real Card with and without AOL, the hand-back lifecycle through the real Card and manager's Params clears, and the shipped safety words through StarPilot's standard safety suite (`test_mazda_measured_profiles.py`).
 
-The root `prebuilt` marker was removed so upstream prebuilt artifacts cannot silently stand in for modified source. `prebuilt.json` was not falsified or regenerated. A matching AGNOS source build is required before installation; this environment has no Docker/AGNOS build setup. No branch push, phone release, vehicle change or deployment was performed.
+This is a source build (no root `prebuilt` marker; `prebuilt.json` not regenerated). `openpilot/system/manager/build.py` records the last successful build and forces a full rebuild whenever tracked build outputs are not what that build left (updater `git reset --hard`, checkout, copy). Fast Update refuses non-prebuilt revisions. A matching AGNOS device build, firmware flash check and vehicle validation are still outstanding.
 
-Latest completed local verification:
-
-- Vehicle/golden suite: 863 tests and 12 subtests passed.
-- Final actual Card/Controls/public API and complete Mazda safety run: 126 tests and 42 subtests passed, with 5 abstract test-class skips.
-- Broader Mazda/lifecycle/app regression run: 1,238 tests and 56 subtests passed, with 5 abstract safety-class skips and 4 pre-existing Cap'n Proto serialization warnings.
-- App/startup regression run: 189 tests and 481 subtests passed.
-- Shared lifecycle/runtime/corruption run: 193 tests and 67 subtests passed.
-- Cross-make policy and companion run: 531 tests and 12 subtests passed; one manifest HTTP timeout passed in its isolated rerun. Companion behavior was not changed.
-- All three standard firmware targets built with the real ARM compiler. Changed-file Ruff and Git whitespace checks pass.
-
-The native golden audit compares all 7,010 frames against the previous native snapshot: only `steerFaultTemporary` changes in 404 stock-long CX-5 frames; every CAN byte and other recorded field is identical. The two original upstream fixtures remain byte-for-byte unchanged.
-
-Exact final counts, command scopes and artifact hashes are in the delivery verification report. These runs overlap; counts are not an aggregate.
+Exact counts, commands and artifact hashes are in the delivery verification report.
 
 ## Attribution
 

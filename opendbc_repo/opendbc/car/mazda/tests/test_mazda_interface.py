@@ -58,6 +58,10 @@ EPS_PROJECTIONS = {
 }
 
 
+
+# StarPilot admission: only these platforms control; the rest stay dashcam (docs/mazda-port/support-matrix.md).
+ADMITTED = (CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021)
+
 class TestMazdaEps:
   """What follows the EPS. Every gen1 Mazda EPS is the same hardware, so the measured envelope,
   the panda's matching limits, the 0.14 s actuator delay and lateral itself go with every car.
@@ -72,7 +76,7 @@ class TestMazdaEps:
   def test_projection(self, name, alpha_long):
     candidate, fw, steer_to_zero, alpha_offered = EPS_PROJECTIONS[name]
     CP = car_params(candidate, car_fw=eps_fw(fw) if fw else None, alpha_long=alpha_long)
-    assert not CP.dashcamOnly
+    assert CP.dashcamOnly is (CP.carFingerprint not in ADMITTED)
     assert CP.steerActuatorDelay == pytest.approx(0.05, abs=5e-8)
     assert CP.safetyConfigs[0].safetyParam & MazdaSafetyFlags.EPS_HW.value
     assert bool(CP.flags & MazdaFlags.STEER_TO_ZERO_EPS) == steer_to_zero
@@ -91,10 +95,10 @@ class TestMazdaEps:
     # wherever the steer-to-zero EPS is, the platforms that ship it and any swap, except a
     # platform whose DBC has no radar bus (the pre-2021 CX-9): the port has never seen its radar.
     CP = car_params(candidate, car_fw=eps_fw(SWAPPED_EPS_FW) if swapped else None, alpha_long=True)
-    assert not CP.dashcamOnly
+    assert CP.dashcamOnly is (CP.carFingerprint not in ADMITTED)
     assert CP.flags & MazdaFlags.EPS_HW
     assert CP.safetyConfigs[0].safetyParam & MazdaSafetyFlags.EPS_HW.value
-    expected = (candidate in STEER_TO_ZERO_PLATFORMS or swapped) and Bus.radar in DBC[candidate]
+    expected = (candidate in STEER_TO_ZERO_PLATFORMS or swapped) and Bus.radar in DBC[candidate] and candidate != CAR.MAZDA_CX9_2021
     assert CP.alphaLongitudinalAvailable == expected
     assert bool(CP.safetyConfigs[0].safetyParam & MazdaSafetyFlags.LONG.value) == expected
 
@@ -113,7 +117,7 @@ class TestMazdaEps:
     from opendbc.car import gen_empty_fingerprint
     from opendbc.car.mazda.interface import CarInterface
     CP = CarInterface.get_params(candidate, gen_empty_fingerprint(), [], alpha_long=False, is_release=False, docs=True)
-    assert not CP.dashcamOnly
+    assert CP.dashcamOnly is (CP.carFingerprint not in ADMITTED)
 
   def test_legacy_firmware_is_listed_for_the_2022_body_only(self):
     assert LEGACY_FW_EPS in FW_VERSIONS[CAR.MAZDA_CX5_2022][(Ecu.eps, 0x730, None)]
@@ -148,7 +152,7 @@ class TestForeignRadar:
     fw = eps_fw(SWAPPED_EPS_FW) + [radar_fw(G46L_FW)]
     CP = car_params(CAR.MAZDA_CX5_KE, car_fw=fw, alpha_long=True)
     assert CP.radarUnavailable
-    assert not CP.dashcamOnly
+    assert CP.dashcamOnly is (CP.carFingerprint not in ADMITTED)
     assert CP.alphaLongitudinalAvailable
     assert CP.openpilotLongitudinalControl
     assert bool(CP.safetyConfigs[0].safetyParam & MazdaSafetyFlags.LONG.value)
